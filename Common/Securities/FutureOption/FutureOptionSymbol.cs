@@ -23,14 +23,25 @@ namespace QuantConnect.Securities.FutureOption
     public static class FutureOptionSymbol
     {
         /// <summary>
-        /// Detects if the future option contract is standard, i.e. not weekly, not short-term, not mid-sized, etc.
+        /// Detects if the future option contract is standard, i.e. not weekly, not end-of-month, not daily
         /// </summary>
-        /// <param name="_">Symbol</param>
-        /// <returns>true</returns>
+        /// <param name="symbol">Symbol</param>
+        /// <returns>True if standard</returns>
         /// <remarks>
-        /// We have no way of identifying the type of FOP contract based on the properties contained within the Symbol.
+        /// Classification is driven by the option root's expiry cycle in
+        /// <see cref="FutureOptionsRootRegistry"/>. Unknown roots are treated as standard,
+        /// preserving the legacy behavior of always returning true
         /// </remarks>
-        public static bool IsStandard(Symbol _) => true;
+        public static bool IsStandard(Symbol symbol)
+        {
+            FutureOptionRootDefinition definition;
+            if (!FutureOptionsRootRegistry.TryGetDefinition(symbol.ID.Symbol, symbol.ID.Market, out definition))
+            {
+                return true;
+            }
+
+            return (definition.Cycle & FutureOptionExpiryCycles.Standard) != 0;
+        }
 
         /// <summary>
         /// Gets the last day of trading, aliased to be the Futures options' expiry
