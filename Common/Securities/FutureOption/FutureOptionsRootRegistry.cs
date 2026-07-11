@@ -304,6 +304,18 @@ namespace QuantConnect.Securities.FutureOption
         }
 
         /// <summary>
+        /// Option roots present in the legacy mapping dictionary but absent from the legacy
+        /// hardcoded expiry table in FuturesOptionsExpiryFunctions. These roots historically
+        /// resolved their expiry through the silent fallback to the underlying future's expiry;
+        /// the registry declares that fallback explicitly via the "underlying_future" rule id
+        /// so that the strict unknown-root throw (design B issue 7) does not break them
+        /// </summary>
+        private static readonly HashSet<string> _underlyingFutureExpiryRoots = new HashSet<string>
+        {
+            "OEH", "HCO", "OH", "PAO", "PO", "OB", "OYG", "OZG", "OZI"
+        };
+
+        /// <summary>
         /// Built-in seed preserving the legacy hardcoded GLOBEX future-to-option-root mappings.
         /// Used when future-option-roots.json is missing or unreadable so that existing
         /// deployments never break
@@ -351,18 +363,36 @@ namespace QuantConnect.Securities.FutureOption
                 new[] { "6S", "CHU", QuantConnect.Market.CME }
             };
 
-            return legacyMappings.Select(mapping => new FutureOptionRootDefinition
+            var seed = legacyMappings.Select(mapping => new FutureOptionRootDefinition
             {
                 FutureTicker = mapping[0],
                 OptionTicker = mapping[1],
                 Market = mapping[2],
                 Cycle = FutureOptionExpiryCycles.Standard,
-                ExpiryRuleId = "legacy",
+                ExpiryRuleId = _underlyingFutureExpiryRoots.Contains(mapping[1]) ? "underlying_future" : "legacy",
                 UnderlyingRuleId = "legacy",
                 ListedSince = new DateTime(1900, 1, 1),
                 Settlement = FutureOptionSettlement.FuturesSettled,
                 Enabled = true
             }).ToList();
+
+            // Feeder Cattle: identity root without a legacy expiry-table entry. CME GF options
+            // terminate with the underlying future, so the historical silent-fallback value was
+            // correct for it; declared explicitly so the strict unknown-root throw does not break it
+            seed.Add(new FutureOptionRootDefinition
+            {
+                FutureTicker = "GF",
+                OptionTicker = "GF",
+                Market = QuantConnect.Market.CME,
+                Cycle = FutureOptionExpiryCycles.Standard,
+                ExpiryRuleId = "underlying_future",
+                UnderlyingRuleId = "legacy",
+                ListedSince = new DateTime(1900, 1, 1),
+                Settlement = FutureOptionSettlement.FuturesSettled,
+                Enabled = true
+            });
+
+            return seed;
         }
 
         private class RootsFile

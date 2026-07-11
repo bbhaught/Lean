@@ -14,7 +14,10 @@
 */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using QuantConnect.Configuration;
+using QuantConnect.Logging;
 using QuantConnect.Securities.Future;
 
 namespace QuantConnect.Securities.FutureOption
@@ -119,28 +122,102 @@ namespace QuantConnect.Securities.FutureOption
         };
 
         /// <summary>
+        /// Roots the legacy silent fallback has already been warned about, to avoid log spam when
+        /// 'fop-strict-expiry' is disabled
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, byte> _warnedFallbackRoots = new();
+
+        /// <summary>
         /// Gets the Futures Options' expiry for the given contract month.
+        /// fop-weeklies fork: roots absent from the legacy hardcoded table are resolved through the
+        /// <see cref="FutureOptionsRootRegistry"/> and the expiry-rule engine; roots unknown to both
+        /// throw <see cref="NotSupportedException"/> instead of silently falling back to the
+        /// underlying future's expiry (design B issue 7). Set 'fop-strict-expiry' to false to
+        /// restore the legacy silent fallback
         /// </summary>
         /// <param name="canonicalFutureOptionSymbol">Canonical Futures Options Symbol. Will be made canonical if not provided a canonical</param>
-        /// <param name="futureContractMonth">Contract month of the underlying Future</param>
+        /// <param name="futureContractMonth">Contract month of the underlying Future. For weekly
+        /// roots the expiry is computed for the root's week-of-month within that same calendar month</param>
         /// <returns>Expiry date/time</returns>
         public static DateTime FuturesOptionExpiry(Symbol canonicalFutureOptionSymbol, DateTime futureContractMonth)
         {
             if (!canonicalFutureOptionSymbol.IsCanonical() || !canonicalFutureOptionSymbol.Underlying.IsCanonical())
             {
+                // fop-weeklies fork: preserve the option root (ID.Symbol) when re-canonicalizing so
+                // weekly/EOM roots (EW1, E1C, ...) are not collapsed back onto the standard monthly
+                // root. Legacy symbols always carry the mapped standard root in ID.Symbol, so this
+                // is byte-identical with the previous re-canonicalization for them
                 canonicalFutureOptionSymbol = Symbol.CreateCanonicalOption(
                     Symbol.Create(canonicalFutureOptionSymbol.Underlying.ID.Symbol,
                         SecurityType.Future,
-                        canonicalFutureOptionSymbol.Underlying.ID.Market));
+                        canonicalFutureOptionSymbol.Underlying.ID.Market),
+                    canonicalFutureOptionSymbol.ID.Symbol,
+                    canonicalFutureOptionSymbol.ID.Market,
+                    null);
             }
 
-            if (!_futuresOptionExpiryFunctions.TryGetValue(canonicalFutureOptionSymbol, out var expiryFunction))
+            // 1) Legacy hardcoded table: authoritative for the upstream monthly/quarterly roots,
+            //    outputs are byte-identical with the pre-fork implementation (golden tested)
+            if (_futuresOptionExpiryFunctions.TryGetValue(canonicalFutureOptionSymbol, out var expiryFunction))
             {
-                // No definition exists for this FOP. Let's default to futures expiry.
-                return FuturesExpiryFunctions.FuturesExpiryFunction(canonicalFutureOptionSymbol.Underlying)(futureContractMonth);
+                return expiryFunction(futureContractMonth);
             }
 
-            return expiryFunction(futureContractMonth);
+            var optionRoot = canonicalFutureOptionSymbol.ID.Symbol;
+            var market = canonicalFutureOptionSymbol.ID.Market;
+
+            // 2) fop-weeklies fork: registry-driven expiry rules (weekly, end-of-month, daily roots)
+            if (FutureOptionsRootRegistry.TryGetDefinition(optionRoot, market, out var definition))
+            {
+                if (FutureOptionExpiryRuleResolver.TryResolve(definition, out var expiryRule))
+                {
+                    var underlying = canonicalFutureOptionSymbol.Underlying;
+                    var holidays = FuturesExpiryUtilityFunctions.GetExpirationHolidays(underlying.ID.Market, underlying.ID.Symbol);
+                    var contractKey = new FutureOptionContractKey(futureContractMonth.Year, futureContractMonth.Month,
+                        definition.WeekOfMonth);
+                    return expiryRule.GetExpiryDate(contractKey, holidays);
+                }
+
+                if (definition.ExpiryRuleId == FutureOptionExpiryRuleResolver.UnderlyingFuture)
+                {
+                    // Roots whose expiry rule was never implemented upstream and which historically
+                    // resolved through the silent fallback (OEH, HCO, OH, PAO, PO, OB, OYG, OZG, OZI).
+                    // The registry declares the fallback explicitly so their behavior is unchanged
+                    return FuturesExpiryFunctions.FuturesExpiryFunction(canonicalFutureOptionSymbol.Underlying)(futureContractMonth);
+                }
+
+                // "legacy" declared in the registry but no hardcoded table entry exists: the
+                // registry is misconfigured, fail loudly instead of guessing
+                throw new NotSupportedException(
+                    "FuturesOptionsExpiryFunctions.FuturesOptionExpiry(): future option root " +
+                    $"'{optionRoot}' (market '{market}') declares expiry rule " +
+                    $"'{definition.ExpiryRuleId}' but the legacy expiry table has no entry for it. " +
+                    "Fix its definition in Data/symbol-properties/future-option-roots.json");
+            }
+
+            // 3) fop-weeklies fork (design B issue 7): the upstream silent fallback to the future's
+            //    expiry produced plausible-looking but wrong expiries for every unknown root. Throw
+            //    by default; 'fop-strict-expiry' = false restores the legacy behavior
+            if (Config.GetBool("fop-strict-expiry", true))
+            {
+                throw new NotSupportedException(
+                    "FuturesOptionsExpiryFunctions.FuturesOptionExpiry(): no expiry rule is defined " +
+                    $"for future option root '{optionRoot}' on market '{market}' (underlying future " +
+                    $"'{canonicalFutureOptionSymbol.Underlying.ID.Symbol}'). Add the root to " +
+                    "Data/symbol-properties/future-option-roots.json, or set 'fop-strict-expiry' to " +
+                    "false to restore the legacy silent fallback to the underlying future's expiry, " +
+                    "which is almost always incorrect");
+            }
+
+            if (_warnedFallbackRoots.TryAdd($"{market}-{optionRoot}", 0))
+            {
+                Log.Error("FuturesOptionsExpiryFunctions.FuturesOptionExpiry(): no expiry rule defined " +
+                    $"for future option root '{optionRoot}' (market '{market}'), falling back to the " +
+                    "underlying future's expiry because 'fop-strict-expiry' is disabled. This is almost " +
+                    "always incorrect");
+            }
+
+            return FuturesExpiryFunctions.FuturesExpiryFunction(canonicalFutureOptionSymbol.Underlying)(futureContractMonth);
         }
 
         /// <summary>
