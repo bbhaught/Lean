@@ -191,7 +191,10 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption
             Assert.AreEqual(26, all.Count);
 
             var zNWeekly = FutureOptionsRootRegistry.MapAll("ZN", Market.CBOT, FutureOptionExpiryCycles.Weekly);
-            Assert.AreEqual(10, zNWeekly.Count);
+            // P5-lite (2026-07-12): Friday ZN1-5 + Wednesday WY1-5 from the P1 seed plus the
+            // Monday VY1-5, Tuesday GY1-5 and Thursday HY1-5 series added from the Databento
+            // ALL_SYMBOLS enumeration (weekday codes data-verified, see registry _comments_p5lite)
+            Assert.AreEqual(25, zNWeekly.Count);
 
             // wrong market yields nothing
             Assert.AreEqual(0, FutureOptionsRootRegistry.MapAll("ES", Market.COMEX).Count);
