@@ -68,6 +68,9 @@
     <None Include="TestData\fop_legacy_expiry_golden_2012_2026.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="TestData\fop_legacy_underlying_golden_2012_2026.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="TestData\greeksindicator\american\third_party_1_greeks.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
