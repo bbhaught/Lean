@@ -271,6 +271,20 @@ namespace QuantConnect.Securities.FutureOption
             }
         }
 
+        /// <summary>
+        /// Replaces the registry contents with the given definitions without touching the data folder.
+        /// Intended exclusively for tests that need synthetic roots (e.g. daily-cycle roots that have
+        /// no production seed yet); call <see cref="Reset"/> to restore the data-folder definitions
+        /// </summary>
+        /// <param name="definitions">The definitions to serve until the next reset</param>
+        internal static void SetDefinitionsForTesting(List<FutureOptionRootDefinition> definitions)
+        {
+            lock (_lock)
+            {
+                _state = new Lazy<State>(() => new State(definitions));
+            }
+        }
+
         private static string Key(string optionTicker, string market)
         {
             return $"{market.ToLowerInvariant()}-{optionTicker.ToUpperInvariant()}";

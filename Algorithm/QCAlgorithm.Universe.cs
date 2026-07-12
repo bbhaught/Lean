@@ -539,6 +539,23 @@ namespace QuantConnect.Algorithm
         [DocumentationAttribute(Universes)]
         public void AddUniverseOptions(Symbol underlyingSymbol, Func<OptionFilterUniverse, OptionFilterUniverse> optionFilter)
         {
+            AddUniverseOptions(underlyingSymbol, optionFilter, null);
+        }
+
+        /// <summary>
+        /// Adds a new universe that creates options of the security by monitoring any changes in the Universe the provided security is in.
+        /// Additionally, a filter can be applied to the options generated when the universe of the security changes.
+        /// </summary>
+        /// <param name="underlyingSymbol">Underlying Symbol to add as an option. For Futures, the option chain constructed will be per-contract, as long as a canonical Symbol is provided.</param>
+        /// <param name="optionFilter">User-defined filter used to select the options we want out of the option chain provided.</param>
+        /// <param name="optionRoots">Optional list of option root tickers to create one chain universe per root for
+        /// (fop-weeklies fork: e.g. the standard ES root plus weekly roots such as EW3). Null creates a single
+        /// universe on the default root, which is the legacy behavior</param>
+        /// <exception cref="InvalidOperationException">The underlying Symbol's universe is not found.</exception>
+        [DocumentationAttribute(Universes)]
+        public void AddUniverseOptions(Symbol underlyingSymbol, Func<OptionFilterUniverse, OptionFilterUniverse> optionFilter,
+            IReadOnlyCollection<string> optionRoots)
+        {
             // We need to load the universe associated with the provided Symbol and provide that universe to the option filter universe.
             // The option filter universe will subscribe to any changes in the universe of the underlying Symbol,
             // ensuring that we load the option chain for every asset found in the underlying's Universe.
@@ -557,7 +574,7 @@ namespace QuantConnect.Algorithm
             }
 
             // Allow all option contracts through without filtering if we're provided a null filter.
-            AddUniverseOptions(universe, optionFilter ?? (_ => _));
+            AddUniverseSelection(new OptionChainedUniverseSelectionModel(universe, optionFilter ?? (_ => _), optionRoots: optionRoots));
         }
 
         /// <summary>

@@ -153,18 +153,21 @@ namespace QuantConnect.Securities
                 return (T)this;
             }
 
-            // memoization map for ApplyTypesFilter()
-            var memoizedMap = new Dictionary<DateTime, bool>();
+            // memoization map for ApplyTypesFilter(). fop-weeklies fork: keyed on (root, expiration)
+            // instead of expiration only, because future option roots with different expiry cycles
+            // can share an expiration date (e.g. the ES quarterly and the EW3 weekly both expire on
+            // the third Friday) while classifying differently
+            var memoizedMap = new Dictionary<(string, DateTime), bool>();
 
             Func<TData, bool> memoizedIsStandardType = data =>
             {
-                var dt = data.ID.Date;
+                var key = (data.ID.Symbol, data.ID.Date);
 
                 bool result;
-                if (memoizedMap.TryGetValue(dt, out result))
+                if (memoizedMap.TryGetValue(key, out result))
                     return result;
                 var res = IsStandard(data.Symbol);
-                memoizedMap[dt] = res;
+                memoizedMap[key] = res;
 
                 return res;
             };

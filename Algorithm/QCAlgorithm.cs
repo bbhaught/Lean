@@ -33,6 +33,7 @@ using QuantConnect.Securities;
 using QuantConnect.Securities.Cfd;
 using QuantConnect.Securities.Equity;
 using QuantConnect.Securities.Forex;
+using QuantConnect.Securities.FutureOption;
 using QuantConnect.Securities.IndexOption;
 using QuantConnect.Securities.Option;
 using QuantConnect.Statistics;
@@ -178,6 +179,11 @@ namespace QuantConnect.Algorithm
 
             // AlgorithmManager will flip this when we're caught up with realtime
             IsWarmingUp = true;
+
+            // fop-weeklies fork: future option cycle registrations are process-level state consulted
+            // by the chain providers; start every algorithm from a clean slate so registrations do
+            // not leak between algorithm runs within the same process (e.g. regression test suites)
+            FutureOptionChainCycleSettings.Reset();
 
             //Initialise the Algorithm Helper Classes:
             //- Note - ideally these wouldn't be here, but because of the DLL we need to make the classes shared across
@@ -2256,24 +2262,73 @@ namespace QuantConnect.Algorithm
         /// </summary>
         /// <param name="symbol">The <see cref="Future"/> canonical symbol (i.e. Symbol returned from <see cref="AddFuture"/>)</param>
         /// <param name="optionFilter">Filter to apply to option contracts loaded as part of the universe</param>
+        /// <param name="cycles">The option expiry cycles to include. The default,
+        /// <see cref="FutureOptionExpiryCycles.Standard"/>, loads only the standard monthly/quarterly root and is
+        /// identical to the legacy behavior. Include <see cref="FutureOptionExpiryCycles.Weekly"/>,
+        /// <see cref="FutureOptionExpiryCycles.EndOfMonth"/> or <see cref="FutureOptionExpiryCycles.Daily"/> to also
+        /// load the corresponding option roots from the <see cref="FutureOptionsRootRegistry"/></param>
+        /// <param name="rootFilter">Optional explicit list of option root tickers (e.g. "EW3", "E1A") to restrict
+        /// the chain to. Null loads every registry root matching the requested cycles</param>
         /// <returns>The new <see cref="Option"/> security, containing a <see cref="Future"/> as its underlying.</returns>
         /// <exception cref="ArgumentException">The symbol provided is not canonical.</exception>
         [DocumentationAttribute(AddingData)]
-        public void AddFutureOption(Symbol symbol, Func<OptionFilterUniverse, OptionFilterUniverse> optionFilter = null)
+        public void AddFutureOption(Symbol symbol, Func<OptionFilterUniverse, OptionFilterUniverse> optionFilter = null,
+            FutureOptionExpiryCycles cycles = FutureOptionExpiryCycles.Standard, IEnumerable<string> rootFilter = null)
         {
             if (!symbol.IsCanonical())
             {
                 throw new ArgumentException("Symbol provided must be canonical (i.e. the Symbol returned from AddFuture(), not AddFutureContract().");
             }
 
-            AddUniverseOptions(symbol, optionFilter);
+            var normalizedRootFilter = rootFilter?.Select(root => root.ToUpperInvariant()).ToList();
+
+            // let the chain providers know which roots to fan out over for this future
+            FutureOptionChainCycleSettings.Register(symbol.ID.Symbol, symbol.ID.Market, cycles, normalizedRootFilter);
+
+            var optionRoots = ResolveFutureOptionRoots(symbol, cycles, normalizedRootFilter);
+
+            AddUniverseOptions(symbol, optionFilter, optionRoots);
 
             // Also add universe options for ContinuousContractUniverse to handle continuous futures
             var continuousUniverseSymbol = ContinuousContractUniverse.CreateSymbol(symbol);
             if (UniverseManager.ContainsKey(continuousUniverseSymbol))
             {
-                AddUniverseOptions(continuousUniverseSymbol, optionFilter);
+                AddUniverseOptions(continuousUniverseSymbol, optionFilter, optionRoots);
             }
+        }
+
+        /// <summary>
+        /// Resolves the option root tickers to create chain universes for, given the requested expiry
+        /// cycles and optional explicit root filter. Returns null for the default request
+        /// (standard cycles, no filter), which preserves the legacy single-universe code path
+        /// </summary>
+        /// <param name="futureSymbol">The canonical future symbol</param>
+        /// <param name="cycles">The requested expiry cycles</param>
+        /// <param name="rootFilter">Optional explicit list of upper-cased option root tickers</param>
+        /// <returns>The option roots to create universes for, or null to use the legacy default root</returns>
+        private IReadOnlyCollection<string> ResolveFutureOptionRoots(Symbol futureSymbol, FutureOptionExpiryCycles cycles,
+            IReadOnlyCollection<string> rootFilter)
+        {
+            if (cycles == FutureOptionExpiryCycles.Standard && rootFilter == null)
+            {
+                // legacy-identical default: a single universe on the default (standard monthly) root
+                return null;
+            }
+
+            var definitions = FutureOptionsRootRegistry.MapAll(futureSymbol.ID.Symbol, futureSymbol.ID.Market, cycles)
+                .Where(definition => rootFilter == null || rootFilter.Contains(definition.OptionTicker))
+                .ToList();
+
+            if (definitions.Count == 0)
+            {
+                Debug($"Warning: no future option roots found for future '{futureSymbol.ID.Symbol}' " +
+                    $"(market '{futureSymbol.ID.Market}') matching cycles '{cycles}'" +
+                    (rootFilter != null ? $" and root filter [{string.Join(", ", rootFilter)}]" : string.Empty) +
+                    ". Using the default standard root.");
+                return null;
+            }
+
+            return definitions.Select(definition => definition.OptionTicker).ToList();
         }
 
         /// <summary>

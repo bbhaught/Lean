@@ -135,9 +135,21 @@ namespace QuantConnect.Data.UniverseSelection
                 var expiry = stream.GetDateTime("yyyyMMdd");
                 var strike = stream.GetDecimal();
                 var right = char.ToUpperInvariant(stream.GetChar()) == 'C' ? OptionRight.Call : OptionRight.Put;
-                var targetOption = config.Symbol.SecurityType != SecurityType.IndexOption ? null : config.Symbol.ID.Symbol;
+                // fop-weeklies fork: like weekly index options (SPXW), future option roots can differ from the
+                // default root of their underlying future (e.g. weekly ES roots EW1-EW4). Propagating the
+                // subscription's own root as the target option preserves it on the created symbols. For the
+                // default/monthly roots this is byte-identical with passing null, which resolved the same root
+                // through FuturesOptionsSymbolMappings.Map
+                var targetOption = config.Symbol.SecurityType == SecurityType.IndexOption
+                    || config.Symbol.SecurityType == SecurityType.FutureOption
+                    ? config.Symbol.ID.Symbol : null;
 
-                var cacheKey = (config.SecurityType, config.Market, targetOption ?? config.Symbol.Underlying.Value, expiry, strike, right);
+                // For future options, key on both the root and the underlying contract: different underlying
+                // future contracts share the same option root (e.g. ESH20 and ESM20 chains under root "ES")
+                var tickerKey = config.Symbol.SecurityType == SecurityType.FutureOption
+                    ? $"{targetOption}|{config.Symbol.Underlying.Value}"
+                    : targetOption ?? config.Symbol.Underlying.Value;
+                var cacheKey = (config.SecurityType, config.Market, tickerKey, expiry, strike, right);
                 if (!TryGetCachedSymbol(cacheKey, out symbol))
                 {
                     symbol = Symbol.CreateOption(config.Symbol.Underlying, targetOption, config.Symbol.ID.Market,

@@ -19,6 +19,7 @@ using QuantConnect.Data.Market;
 using QuantConnect.Indicators;
 using System;
 using QuantConnect.Securities;
+using QuantConnect.Securities.FutureOption;
 using NodaTime;
 using System.Collections.Generic;
 using QuantConnect.Python;
@@ -233,19 +234,59 @@ namespace QuantConnect.Algorithm
         /// Creates and adds a new Future Option contract to the algorithm.
         /// </summary>
         /// <param name="futureSymbol">The Future canonical symbol (i.e. Symbol returned from <see cref="AddFuture"/>)</param>
-        /// <param name="optionFilter">Filter to apply to option contracts loaded as part of the universe</param>
+        /// <param name="optionFilter">Filter to apply to option contracts loaded as part of the universe. May be None</param>
+        /// <param name="cycles">The option expiry cycles to include. The default,
+        /// <see cref="FutureOptionExpiryCycles.Standard"/>, loads only the standard monthly/quarterly root and is
+        /// identical to the legacy behavior</param>
+        /// <param name="rootFilter">Optional python list of option root tickers (e.g. ["EW3", "E1A"]) to restrict
+        /// the chain to. None loads every registry root matching the requested cycles</param>
         /// <returns>The new Option security, containing a Future as its underlying.</returns>
         /// <exception cref="ArgumentException">The symbol provided is not canonical.</exception>
         [DocumentationAttribute(AddingData)]
-        public void AddFutureOption(Symbol futureSymbol, PyObject optionFilter)
+        public void AddFutureOption(Symbol futureSymbol, PyObject optionFilter,
+            FutureOptionExpiryCycles cycles = FutureOptionExpiryCycles.Standard, PyObject rootFilter = null)
         {
-            Func<OptionFilterUniverse, OptionFilterUniverse> optionFilterUniverse;
-            if (!optionFilter.TrySafeAs(out optionFilterUniverse))
+            Func<OptionFilterUniverse, OptionFilterUniverse> optionFilterUniverse = null;
+            if (optionFilter != null && !optionFilter.IsNone() && !optionFilter.TrySafeAs(out optionFilterUniverse))
             {
                 throw new ArgumentException("Option contract universe filter provided is not a function");
             }
 
-            AddFutureOption(futureSymbol, optionFilterUniverse);
+            AddFutureOption(futureSymbol, optionFilterUniverse, cycles, ConvertToRootFilter(rootFilter));
+        }
+
+        /// <summary>
+        /// Converts a python object (a list of strings or a single string) into a future option root filter
+        /// </summary>
+        /// <param name="rootFilter">The python object to convert. May be null or None</param>
+        /// <returns>The root tickers, or null when no filter was provided</returns>
+        private static List<string> ConvertToRootFilter(PyObject rootFilter)
+        {
+            if (rootFilter == null)
+            {
+                return null;
+            }
+
+            using (Py.GIL())
+            {
+                if (rootFilter.IsNone())
+                {
+                    return null;
+                }
+
+                if (rootFilter.TrySafeAs(out string singleRoot))
+                {
+                    return new List<string> { singleRoot };
+                }
+
+                if (rootFilter.TrySafeAs(out List<string> roots))
+                {
+                    return roots;
+                }
+
+                throw new ArgumentException("Future option root filter must be a string or a list of strings, " +
+                    $"e.g. [\"EW3\", \"E1A\"], but was: {rootFilter}");
+            }
         }
 
         /// <summary>

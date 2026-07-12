@@ -65,6 +65,20 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         /// <param name="date">The date to search for</param>
         protected IEnumerable<Symbol> GetSymbols(Symbol canonicalSymbol, DateTime date)
         {
+            return GetSymbols(canonicalSymbol, date, allowStaleUniverseFallback: true);
+        }
+
+        /// <summary>
+        /// Get the contract symbols associated with the given canonical symbol and date
+        /// </summary>
+        /// <param name="canonicalSymbol">The canonical symbol</param>
+        /// <param name="date">The date to search for</param>
+        /// <param name="allowStaleUniverseFallback">True to allow serving the latest universe file within the
+        /// last 3 trading days when the requested date's universe file is unavailable. Chains that change
+        /// composition every day, like daily-expiry future option roots, must pass false: a stale chain is a
+        /// different instrument set for them, so a missing universe file yields an empty chain instead</param>
+        protected IEnumerable<Symbol> GetSymbols(Symbol canonicalSymbol, DateTime date, bool allowStaleUniverseFallback)
+        {
             var marketHoursDataBase = MarketHoursDatabase.FromDataFolder();
             var universeType = canonicalSymbol.SecurityType.IsOption() ? typeof(OptionUniverse) : typeof(FutureUniverse);
             // Use this GetEntry extension method since it's data type dependent, so we get the correct entry for the option universe
@@ -74,9 +88,10 @@ namespace QuantConnect.Lean.Engine.DataFeeds
             // we will use the latest available universe file within the last 3 trading dates.
             // This is useful in cases like live trading when the algorithm is deployed at a time of day when
             // the universe file is not available yet.
+            var maxPeriods = allowStaleUniverseFallback ? 3 : 1;
             var history = (List<Slice>)null;
             var periods = 1;
-            while ((history == null || history.Count == 0) && periods <= 3)
+            while ((history == null || history.Count == 0) && periods <= maxPeriods)
             {
                 var startDate = Time.GetStartTimeForTradeBars(marketHoursEntry.ExchangeHours, date, Time.OneDay, periods++,
                     extendedMarketHours: false, marketHoursEntry.DataTimeZone);
@@ -96,9 +111,20 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                 history = HistoryProvider.GetHistory([request], marketHoursEntry.DataTimeZone)?.ToList();
             }
 
-            var symbols = history == null || history.Count == 0
-                ? Enumerable.Empty<Symbol>()
-                : history.Take(1).GetUniverseData().SelectMany(x => x.Values.Single()).Select(x => x.Symbol);
+            var universeDataPoints = history == null || history.Count == 0
+                ? Enumerable.Empty<BaseData>()
+                : history.Take(1).GetUniverseData().SelectMany(x => x.Values.Single());
+
+            if (!allowStaleUniverseFallback)
+            {
+                // Universe files follow LEAN's daily convention: the file of trading date D carries
+                // EndTime D+1 and is the chain known at the start of D+1. On-time data for the
+                // requested date therefore has EndTime.Date == date; anything older is a stale file
+                // resolved through the lookback and must not be served when the fallback is disabled
+                universeDataPoints = universeDataPoints.Where(dataPoint => dataPoint.EndTime.Date == date.Date);
+            }
+
+            var symbols = universeDataPoints.Select(x => x.Symbol);
 
             if (canonicalSymbol.SecurityType.IsOption())
             {

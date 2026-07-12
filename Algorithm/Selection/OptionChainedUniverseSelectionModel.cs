@@ -47,9 +47,13 @@ namespace QuantConnect.Algorithm.Selection
         /// <param name="universe">The universe we want to chain to</param>
         /// <param name="optionFilter">The option filter universe to use</param>
         /// <param name="universeSettings">Universe settings define attributes of created subscriptions, such as their resolution and the minimum time in universe before they can be removed</param>
+        /// <param name="optionRoots">Optional list of option root tickers to create one chain universe per root for
+        /// each selected underlying (fop-weeklies fork: e.g. the standard ES root plus weekly roots such as EW3).
+        /// Null creates a single universe on the default root, which is the legacy behavior</param>
         public OptionChainedUniverseSelectionModel(Universe universe,
             Func<OptionFilterUniverse, OptionFilterUniverse> optionFilter,
-            UniverseSettings universeSettings = null)
+            UniverseSettings universeSettings = null,
+            IReadOnlyCollection<string> optionRoots = null)
         {
             _optionFilter = optionFilter;
             _universeSettings = universeSettings;
@@ -65,15 +69,43 @@ namespace QuantConnect.Algorithm.Selection
                 // Otherwise, we'll end up loading equity data for the selected Symbol, which won't
                 // work whenever we're loading options data for any non-equity underlying asset class.
                 _currentSymbols = ((Universe.SelectionEventArgs)args).CurrentSelection
-                    .Select(symbol => Symbol.CreateOption(
-                        symbol,
-                        symbol.ID.Market,
-                        symbol.SecurityType.DefaultOptionStyle(),
-                        default(OptionRight),
-                        0m,
-                        SecurityIdentifier.DefaultDate))
+                    .SelectMany(symbol => CreateCanonicalOptionSymbols(symbol, optionRoots))
                     .ToList();
             };
+        }
+
+        /// <summary>
+        /// Creates the canonical option symbols to build chain universes for the given underlying: one per
+        /// requested option root, or a single default-root canonical when no roots were requested
+        /// </summary>
+        /// <param name="underlyingSymbol">The selected underlying symbol</param>
+        /// <param name="optionRoots">The requested option root tickers, or null for the default root</param>
+        /// <returns>The canonical option symbols</returns>
+        private static IEnumerable<Symbol> CreateCanonicalOptionSymbols(Symbol underlyingSymbol, IReadOnlyCollection<string> optionRoots)
+        {
+            if (optionRoots == null || optionRoots.Count == 0)
+            {
+                yield return Symbol.CreateOption(
+                    underlyingSymbol,
+                    underlyingSymbol.ID.Market,
+                    underlyingSymbol.SecurityType.DefaultOptionStyle(),
+                    default(OptionRight),
+                    0m,
+                    SecurityIdentifier.DefaultDate);
+                yield break;
+            }
+
+            foreach (var optionRoot in optionRoots)
+            {
+                yield return Symbol.CreateOption(
+                    underlyingSymbol,
+                    optionRoot,
+                    underlyingSymbol.ID.Market,
+                    underlyingSymbol.SecurityType.DefaultOptionStyle(),
+                    default(OptionRight),
+                    0m,
+                    SecurityIdentifier.DefaultDate);
+            }
         }
 
         /// <summary>

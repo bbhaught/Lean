@@ -24,7 +24,6 @@ using QuantConnect.Logging;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
 using System.Collections.Generic;
-using QuantConnect.Securities.Future;
 using QuantConnect.Securities.FutureOption;
 using QuantConnect.Securities.FutureOption.Api;
 using System.Net.Http.Headers;
@@ -179,83 +178,70 @@ namespace QuantConnect.Lean.Engine.DataFeeds
 
                     optionsTradesAndExpiriesResponse.Dispose();
 
-                    // For now, only support American options on CME
-                    var selectedOption = tradesAndExpiriesResponse
-                        .FirstOrDefault(x => !x.Daily && !x.Weekly && !x.Sto && x.OptionType == "AME");
+                    // fop-weeklies fork: map every CME option entry (standard, weekly, end-of-month, daily;
+                    // American and European) onto the registry roots enabled for the requested cycles, instead
+                    // of only the single standard American entry. Entries the registry does not know are
+                    // dropped instead of being emitted with wrong metadata (upstream issue #8427)
+                    var cycles = FutureOptionChainCycleSettings.GetCycles(futureContractSymbol.ID.Symbol, futureContractSymbol.ID.Market);
+                    var rootFilter = FutureOptionChainCycleSettings.GetRootFilter(futureContractSymbol.ID.Symbol, futureContractSymbol.ID.Market);
+                    var mappedSeries = CmeFutureOptionChainMapper.MapSeries(futureContractSymbol, tradesAndExpiriesResponse, cycles, rootFilter);
 
-                    if (selectedOption == null)
+                    if (mappedSeries.Count == 0)
                     {
                         Log.Error($"LiveOptionChainProvider.GetFutureOptionContractList(): Found no matching future options for contract {futureContractSymbol}");
                         yield break;
                     }
 
-                    // Gather the month code and the year's last number to query the next API, which expects an expiration as `<MONTH_CODE><YEAR_LAST_NUMBER>`
-                    var expiryFunction = FuturesExpiryFunctions.FuturesExpiryFunction(futureContractSymbol.Canonical);
-
-                    var futureContractExpiration = selectedOption.Expirations
-                        .Select(x => new KeyValuePair<CMEOptionsExpiration, DateTime>(x, expiryFunction(new DateTime(x.Expiration.Year, x.Expiration.Month, 1))))
-                        .FirstOrDefault(x => x.Value.Year == futureContractSymbol.ID.Date.Year && x.Value.Month == futureContractSymbol.ID.Date.Month)
-                        .Key;
-
-                    if (futureContractExpiration == null)
-                    {
-                        Log.Error($"LiveOptionChainProvider.GetFutureOptionContractList(): Found no future options with matching expiry year and month for contract {futureContractSymbol}");
-                        yield break;
-                    }
-
-                    var futureContractMonthCode = futureContractExpiration.Expiration.Code;
-
-                    _cmeRateGate.WaitToProceed();
-
-                    // Subtract one day from now for settlement API since settlement may not be available for today yet
-                    var optionChainQuotesResponseResult = _client.GetAsync(CMEOptionChainQuotesURL
-                        .Replace(CMEProductCodeReplace, selectedOption.ProductId.ToStringInvariant())
-                        .Replace(CMEProductExpirationReplace, futureContractMonthCode)
-                        + Math.Floor((DateTime.UtcNow - _epoch).TotalMilliseconds).ToStringInvariant());
-
-                    optionChainQuotesResponseResult.Result.EnsureSuccessStatusCode();
-
-                    var futureOptionChain = JsonConvert.DeserializeObject<CMEOptionChainQuotes>(optionChainQuotesResponseResult.Result.Content
-                        .ReadAsStringAsync()
-                        .SynchronouslyAwaitTaskResult())
-                        .Quotes
-                        .DistinctBy(s => s.StrikePrice)
-                        .ToList();
-
-                    optionChainQuotesResponseResult.Dispose();
-
                     // Each CME contract can have arbitrary scaling applied to the strike price, so we normalize it to the
                     // underlying's price via static entries.
                     var optionStrikePriceScaleFactor = CMEStrikePriceScalingFactors.GetScaleFactor(futureContractSymbol);
-                    var canonicalOption = Symbol.CreateOption(
-                        futureContractSymbol,
-                        futureContractSymbol.ID.Market,
-                        futureContractSymbol.SecurityType.DefaultOptionStyle(),
-                        default(OptionRight),
-                        default(decimal),
-                        SecurityIdentifier.DefaultDate);
 
-                    foreach (var optionChainEntry in futureOptionChain)
+                    foreach (var series in mappedSeries)
                     {
-                        var futureOptionExpiry = FuturesOptionsExpiryFunctions.GetFutureOptionExpiryFromFutureExpiry(futureContractSymbol, canonicalOption);
-                        var scaledStrikePrice = optionChainEntry.StrikePrice / optionStrikePriceScaleFactor;
+                        _cmeRateGate.WaitToProceed();
 
-                        // Calls and puts share the same strike, create two symbols per each to avoid iterating twice.
-                        symbols.Add(Symbol.CreateOption(
-                            futureContractSymbol,
-                            futureContractSymbol.ID.Market,
-                            OptionStyle.American,
-                            OptionRight.Call,
-                            scaledStrikePrice,
-                            futureOptionExpiry));
+                        // Subtract one day from now for settlement API since settlement may not be available for today yet
+                        var optionChainQuotesResponseResult = _client.GetAsync(CMEOptionChainQuotesURL
+                            .Replace(CMEProductCodeReplace, series.Entry.ProductId.ToStringInvariant())
+                            .Replace(CMEProductExpirationReplace, series.Expiration.Expiration.Code)
+                            + Math.Floor((DateTime.UtcNow - _epoch).TotalMilliseconds).ToStringInvariant());
 
-                        symbols.Add(Symbol.CreateOption(
-                            futureContractSymbol,
-                            futureContractSymbol.ID.Market,
-                            OptionStyle.American,
-                            OptionRight.Put,
-                            scaledStrikePrice,
-                            futureOptionExpiry));
+                        optionChainQuotesResponseResult.Result.EnsureSuccessStatusCode();
+
+                        var futureOptionChain = JsonConvert.DeserializeObject<CMEOptionChainQuotes>(optionChainQuotesResponseResult.Result.Content
+                            .ReadAsStringAsync()
+                            .SynchronouslyAwaitTaskResult())
+                            .Quotes
+                            .DistinctBy(s => s.StrikePrice)
+                            .ToList();
+
+                        optionChainQuotesResponseResult.Dispose();
+
+                        foreach (var optionChainEntry in futureOptionChain)
+                        {
+                            var scaledStrikePrice = optionChainEntry.StrikePrice / optionStrikePriceScaleFactor;
+
+                            // Calls and puts share the same strike, create two symbols per each to avoid iterating twice.
+                            // Note: symbols always carry the LEAN future option default style (American) regardless of
+                            // the CME style code; per-series exercise style/settlement is downstream (P6) work
+                            symbols.Add(Symbol.CreateOption(
+                                futureContractSymbol,
+                                series.OptionTicker,
+                                futureContractSymbol.ID.Market,
+                                OptionStyle.American,
+                                OptionRight.Call,
+                                scaledStrikePrice,
+                                series.OptionExpiry));
+
+                            symbols.Add(Symbol.CreateOption(
+                                futureContractSymbol,
+                                series.OptionTicker,
+                                futureContractSymbol.ID.Market,
+                                OptionStyle.American,
+                                OptionRight.Put,
+                                scaledStrikePrice,
+                                series.OptionExpiry));
+                        }
                     }
 
                     break;
