@@ -109,6 +109,20 @@ namespace QuantConnect.Securities.FutureOption
         /// <returns>Symbol if there is an underlying for the FOP, null if there's no underlying found for the Future Option</returns>
         public static Symbol GetUnderlyingFutureFromFutureOption(string futureOptionTicker, string market, DateTime futureOptionExpiration, DateTime? date = null)
         {
+            // fop-weeklies fork (design A section 3): date-aware, registry-declared underlying
+            // rules for weekly/EOM roots. Resolution keys on the EXACT option expiration date, not
+            // just its contract month: weeklies of the same month can exercise into different
+            // futures depending on whether they expire before or after the relevant standard
+            // option/future expiration. Roots declaring the "legacy" rule id (all upstream
+            // monthly/quarterly roots) fall through to the original path below, byte-identical
+            if (FutureOptionsRootRegistry.TryGetDefinition(futureOptionTicker, market, out var definition)
+                && FutureOptionUnderlyingRuleResolver.TryResolveContractMonth(definition, futureOptionExpiration, out var ruleContractMonth))
+            {
+                var underlyingFuture = Symbol.Create(definition.FutureTicker, SecurityType.Future, definition.Market);
+                var underlyingExpiry = FuturesExpiryFunctions.FuturesExpiryFunction(underlyingFuture)(ruleContractMonth);
+                return Symbol.CreateFuture(definition.FutureTicker, definition.Market, underlyingExpiry);
+            }
+
             var futureTicker = FuturesOptionsSymbolMappings.MapFromOption(futureOptionTicker);
             var canonicalFuture = Symbol.Create(futureTicker, SecurityType.Future, market);
             // Get the contract month of the FOP to use when searching for the underlying.
