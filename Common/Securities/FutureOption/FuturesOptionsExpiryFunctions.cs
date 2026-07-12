@@ -172,7 +172,10 @@ namespace QuantConnect.Securities.FutureOption
                 if (FutureOptionExpiryRuleResolver.TryResolve(definition, out var expiryRule))
                 {
                     var underlying = canonicalFutureOptionSymbol.Underlying;
-                    var holidays = FuturesExpiryUtilityFunctions.GetExpirationHolidays(underlying.ID.Market, underlying.ID.Symbol);
+                    // bank holidays excluded: weeklies expire ON Columbus/Veterans Day
+                    // (real-data verified, see GetExpirationHolidays remarks)
+                    var holidays = FuturesExpiryUtilityFunctions.GetExpirationHolidays(
+                        underlying.ID.Market, underlying.ID.Symbol, includeBankHolidays: false);
                     var contractKey = new FutureOptionContractKey(futureContractMonth.Year, futureContractMonth.Month,
                         definition.WeekOfMonth);
                     return expiryRule.GetExpiryDate(contractKey, holidays);

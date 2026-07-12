@@ -85,6 +85,7 @@ def extract(opt_dirs, fut_dirs):
     opt_rows = {}
     fut_rows = {}
     inconsistent = []
+    time_revisions = []
 
     fut_files = sorted(f for d in fut_dirs for f in glob.glob(os.path.join(d, "*.definition.dbn.zst")))
     opt_files = sorted(f for d in opt_dirs for f in glob.glob(os.path.join(d, "*.definition.dbn.zst")))
@@ -128,16 +129,24 @@ def extract(opt_dirs, fut_dirs):
                     "first_seen": day,
                 }
             else:
-                # identity fields must be stable across daily snapshots
-                if (prev["expiration"] != row.expiration or prev["strike"] != float(row.strike_price)
+                # identity fields must be stable across daily snapshots. Expiration is compared
+                # by DATE: CME revises the expiration TIME for early-close sessions (observed on
+                # real data: Black Friday / Christmas Eve weeklies 15:00 CT -> 12:00 CT). Benign
+                # for date-keyed parity; tracked separately as a settlement-mark-time limitation
+                if (pd.Timestamp(prev["expiration"]).date() != pd.Timestamp(row.expiration).date()
+                        or prev["strike"] != float(row.strike_price)
                         or prev["underlying"] != row.underlying):
                     inconsistent.append((day, row.raw_symbol))
+                elif prev["expiration"] != row.expiration:
+                    time_revisions.append((day, row.raw_symbol,
+                                           str(prev["expiration"]), str(row.expiration)))
+                    prev["expiration"] = row.expiration
 
     opt = pd.DataFrame(opt_rows.values())
     fut = pd.DataFrame(fut_rows.values())
     log(f"extract: {len(opt)} unique option instruments, {len(fut)} unique future outrights, "
-        f"{len(inconsistent)} field-instability events")
-    return opt, fut, inconsistent
+        f"{len(inconsistent)} field-instability events, {len(time_revisions)} expiry-TIME revisions")
+    return opt, fut, inconsistent, time_revisions
 
 
 def join_underlying(opt, fut):
@@ -183,15 +192,23 @@ def build_parity_input(opt, registry_by_ticker, market, workdir):
         root = row.asset
         exp = pd.Timestamp(row.expiration)
         reg = registry_by_ticker.get((root, market))
-        standard = reg is None or reg.get("cycle") in ("Standard", "Monthly", "Quarterly")
-        if standard and row.underlying_month:
-            key = row.underlying_month
-        else:
-            key = f"{exp.year:04d}{exp.month:02d}"
-        if key is None:
+        if reg is None:
+            # not a registry root (e.g. non-trading-date contamination assets): no engine
+            # rules exist to test; reported via the coverage/contamination sections
             skipped.append(row.raw_symbol)
             continue
+        standard = reg.get("cycle") in ("Standard", "Monthly", "Quarterly")
+        if standard:
+            if not isinstance(row.underlying_month, str) or not row.underlying_month:
+                skipped.append(row.raw_symbol)
+                continue
+            key = str(row.underlying_month)
+        else:
+            key = f"{exp.year:04d}{exp.month:02d}"
         rows.add((root, market, key, exp.strftime("%Y%m%d")))
+    if skipped:
+        log(f"parity input: skipped {len(skipped)} instruments (non-registry root or "
+            f"unresolved underlying)")
     path = os.path.join(workdir, "parity_input.csv")
     with open(path, "w") as fh:
         fh.write("optionTicker,market,contractKeyMonth,exchangeExpiry\n")
@@ -309,18 +326,34 @@ def main():
     ap.add_argument("--classify", default=None)
     ap.add_argument("--report", default=None)
     ap.add_argument("--workdir", default="/tmp/fop_registry_validation")
+    ap.add_argument("--from-extraction", action="store_true",
+                    help="reuse instruments_{options,futures}.csv from a previous run in workdir")
     args = ap.parse_args()
 
     os.makedirs(args.workdir, exist_ok=True)
     registry_data, registry_by_ticker = load_registry(args.lean_root)
 
-    opt, fut, inconsistent = extract(args.opt_defs, args.fut_defs)
-    opt, xchk_mismatch, unresolved = join_underlying(opt, fut)
-    opt.to_csv(os.path.join(args.workdir, "instruments_options.csv"), index=False)
-    fut.to_csv(os.path.join(args.workdir, "instruments_futures.csv"), index=False)
+    if args.from_extraction:
+        opt = pd.read_csv(os.path.join(args.workdir, "instruments_options.csv"),
+                          dtype={"underlying_month": str})
+        fut = pd.read_csv(os.path.join(args.workdir, "instruments_futures.csv"))
+        inconsistent, time_revisions, xchk_mismatch = [], [], []
+        unresolved = opt[opt["underlying_month"].isna()]["raw_symbol"].tolist()
+        log(f"from-extraction: {len(opt)} options, {len(fut)} futures "
+            f"(instability/cross-check stats not recomputed)")
+    else:
+        opt, fut, inconsistent, time_revisions = extract(args.opt_defs, args.fut_defs)
+        opt, xchk_mismatch, unresolved = join_underlying(opt, fut)
+        opt.to_csv(os.path.join(args.workdir, "instruments_options.csv"), index=False)
+        fut.to_csv(os.path.join(args.workdir, "instruments_futures.csv"), index=False)
 
-    # (a) root coverage
-    observed_roots = sorted(opt["asset"].unique())
+    # (a) root coverage. Assets with zero id-resolvable underlyings across the whole year are
+    # non-trading-date contamination (Databento instrument-id aliasing on weekend files maps
+    # parent symbols onto unrelated products) - reported separately, not registry gaps
+    resolvable = opt.groupby("asset")["underlying_month"].apply(lambda s: s.notna().sum())
+    contamination = sorted(resolvable[resolvable == 0].index)
+    real = opt[~opt["asset"].isin(contamination)]
+    observed_roots = sorted(real["asset"].unique())
     missing_roots = [r for r in observed_roots if (r, args.market) not in registry_by_ticker]
 
     # (b)+(c) engine parity
@@ -344,8 +377,13 @@ def main():
     out.append(f"- option definition days scanned: unique instruments = {len(opt)}, "
                f"future outrights = {len(fut)}")
     out.append(f"- field-instability events across daily snapshots: {len(inconsistent)}")
+    out.append(f"- expiry-TIME revisions (early-close sessions, benign for date parity): "
+               f"{len(time_revisions)}")
+    for r in time_revisions[:10]:
+        out.append(f"  TIME REVISION {r[1]} on {r[0]}: {r[2]} -> {r[3]}")
     out.append(f"- underlying id->raw-symbol cross-check mismatches: {len(xchk_mismatch)}")
     out.append(f"- options with unresolvable underlying_id: {len(unresolved)}")
+    out.append(f"- contamination assets (non-trading-date id aliasing, excluded): {contamination or 'none'}")
     out.append(f"- observed roots: {observed_roots}")
     out.append(f"- roots MISSING from registry: {missing_roots or 'none'}")
     ep = 100.0 * (1 - len(expiry_bad) / max(stats["n_expiry"], 1))

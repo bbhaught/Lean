@@ -206,7 +206,14 @@ class DayContext:
                 else:
                     cm = self.fut_raw.get(row.underlying)
                     if cm is None:
-                        parsed = parse_contract_month(row.underlying, int(day[:4]))
+                        # string-parse fallback restricted to future tickers present in the
+                        # same-day FUT definitions: non-trading-date files can contain aliased
+                        # instruments from unrelated products (Databento instrument-id reuse on
+                        # weekend dates), which must never enter this complex's data tree
+                        ticker = re.sub(r"[FGHJKMNQUVXZ]\d+$", "", str(row.underlying))
+                        known = {re.sub(r"[FGHJKMNQUVXZ]\d+$", "", f["raw"]) for f in self.fut.values()}
+                        parsed = parse_contract_month(row.underlying, int(day[:4])) \
+                            if ticker in known else None
                         if parsed is None:
                             counters["reject_no_underlying"] += 1
                             log(f"REJECT no underlying {row.raw_symbol} underlying_id="

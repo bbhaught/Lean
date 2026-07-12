@@ -61,6 +61,13 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption
         [TestCase("EW", "ES", Market.CME, "2025-02-28", "2025-03-21")]
         // year boundary: post-quarterly December weekly -> March of the next year:
         [TestCase("EW4", "ES", Market.CME, "2025-12-26", "2026-03-20")]
+        // REAL-DATA CORRECTION (P5-lite pilot 2026-07-12): the week-3 weekly expiring exactly ON
+        // the quarterly futures expiration date is listed in every quarterly month (PM-settled
+        // European EW3 alongside the AM-settled quarterly) and exercises into the NEXT quarterly -
+        // the future cash-settled at the 8:30am SOQ before the weekly's 3:00pm mark. Verified via
+        // Databento GLBX definitions underlying ids (EW3U5 -> ESZ5, EW3Z5 -> ESH6):
+        [TestCase("EW3", "ES", Market.CME, "2025-09-19", "2025-12-19")]
+        [TestCase("EW3", "ES", Market.CME, "2025-12-19", "2026-03-20")]
 
         // -------- NextQuarterlyTreasury: ZN Friday (ZN1-ZN5) and Wednesday (WY1-WY5) weeklies.
         // CME weekly treasury options FAQ: "a Weekly option will exercise into the same futures

@@ -63,8 +63,16 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption.Expiry
         [TestCase("EW2", 2025, 4, "2025-04-11")]
         [TestCase("EW3", 2025, 4, "2025-04-17")]
         [TestCase("EW4", 2025, 4, "2025-04-25")]
-        // July 2025: Independence Day 2025-07-04 is the first Friday, EW1 rolls back to Thursday
-        [TestCase("EW1", 2025, 7, "2025-07-03")]
+        // July 2025: Independence Day 2025-07-04 is the first Friday. REAL-DATA CORRECTION
+        // (P5-lite pilot 2026-07-12): CME does NOT roll holiday-week weeklies - it does not list
+        // them at all (GLBX definitions show no EW1 for Jul-2025, Apr-2026 (Good Friday) or
+        // Jul-2026, and no E1D for Jan-2026 (New Year Thursday); zero off-nominal-weekday
+        // expirations exist anywhere in the pilot year). Independence Day is an MHDB BANK holiday
+        // (partial session) and bank holidays no longer adjust registry-rule expiries (real
+        // contracts E2A/E2B expire ON Columbus/Veterans Day), so the engine returns the nominal
+        // Friday for this NEVER-LISTED contract - a documented phantom, harmless because chains
+        // are data-gated and the live provider maps only actually-listed instruments
+        [TestCase("EW1", 2025, 7, "2025-07-04")]
         [TestCase("EW2", 2025, 7, "2025-07-11")]
         // December 2025: Christmas is Thursday the 25th, Friday the 26th trades normally
         [TestCase("EW4", 2025, 12, "2025-12-26")]
@@ -76,6 +84,12 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption.Expiry
         [TestCase("E5A", 2025, 3, "2025-03-31")]
         [TestCase("E2A", 2025, 6, "2025-06-09")]
         [TestCase("E5A", 2025, 6, "2025-06-30")]
+        // REAL-DATA VERIFIED (P5-lite pilot 2026-07-12, GLBX definitions): bank holidays do NOT
+        // roll equity-index weeklies - E2A expires ON Columbus Day and E2B ON Veterans Day
+        // (equity futures trade through bank holidays; only full closures adjust the expiry)
+        [TestCase("E2A", 2025, 10, "2025-10-13")]
+        // -------- ES Tuesday weekly E2B: Veterans Day 2025-11-11 is the second Tuesday --------
+        [TestCase("E2B", 2025, 11, "2025-11-11")]
         // -------- ES Wednesday weeklies E1C-E5C (CME) --------
         // New Year week edge: January 2026 starts on a Thursday, week-1 Wednesday is January 7th
         [TestCase("E1C", 2026, 1, "2026-01-07")]
@@ -83,7 +97,9 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption.Expiry
         [TestCase("E4C", 2025, 12, "2025-12-24")]
         [TestCase("E5C", 2025, 12, "2025-12-31")]
         // -------- ES Thursday weekly E3D: Juneteenth 2025-06-19 is the third Thursday --------
-        [TestCase("E3D", 2025, 6, "2025-06-18")]
+        // Juneteenth is an MHDB BANK holiday (partial session): no adjustment; per the pilot
+        // real-data finding the affected weekly is simply not listed (phantom date, see EW1 above)
+        [TestCase("E3D", 2025, 6, "2025-06-19")]
         public void EsWeeklyExpiries(string root, int year, int month, string expected)
         {
             Assert.AreEqual(DateTime.Parse(expected, CultureInfo.InvariantCulture),
@@ -106,14 +122,15 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption.Expiry
         }
 
         // -------- Crude oil Friday weeklies LO1-LO5 (NYMEX) --------
-        // LO1 for every month of 2025; July 4th 2025 (first Friday) rolls back to Thursday the 3rd
+        // LO1 for every month of 2025
         [TestCase("LO1", 2025, 1, "2025-01-03")]
         [TestCase("LO1", 2025, 2, "2025-02-07")]
         [TestCase("LO1", 2025, 3, "2025-03-07")]
         [TestCase("LO1", 2025, 4, "2025-04-04")]
         [TestCase("LO1", 2025, 5, "2025-05-02")]
         [TestCase("LO1", 2025, 6, "2025-06-06")]
-        [TestCase("LO1", 2025, 7, "2025-07-03")]
+        // Independence Day 2025-07-04: bank holiday, no adjustment (phantom date, see EW1 note)
+        [TestCase("LO1", 2025, 7, "2025-07-04")]
         [TestCase("LO1", 2025, 8, "2025-08-01")]
         [TestCase("LO1", 2025, 9, "2025-09-05")]
         [TestCase("LO1", 2025, 10, "2025-10-03")]
@@ -139,8 +156,10 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption.Expiry
         [TestCase("OG2", 2025, 2, "2025-02-14")]
         // Good Friday 2025-04-18 is the third Friday of April
         [TestCase("OG3", 2025, 4, "2025-04-17")]
-        // Independence Day 2025-07-04 is the first Friday of July
-        [TestCase("OG1", 2025, 7, "2025-07-03")]
+        // Independence Day 2025-07-04 (bank holiday, partial session): no adjustment, contract
+        // presumed not listed per the pilot equity-index finding (phantom date; metals weeklies
+        // are outside the pilot data - P5 verifies)
+        [TestCase("OG1", 2025, 7, "2025-07-04")]
         [TestCase("OG5", 2025, 8, "2025-08-29")]
         // Friday after Thanksgiving 2025 trades normally
         [TestCase("OG4", 2025, 11, "2025-11-28")]
@@ -156,7 +175,8 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption.Expiry
         [TestCase("ZN1", 2025, 1, "2025-01-03")]
         // Good Friday 2025-04-18 is the third Friday of April
         [TestCase("ZN3", 2025, 4, "2025-04-17")]
-        [TestCase("ZN1", 2025, 7, "2025-07-03")]
+        // Independence Day 2025-07-04: bank holiday, no adjustment (phantom date, see EW1 note)
+        [TestCase("ZN1", 2025, 7, "2025-07-04")]
         [TestCase("ZN4", 2025, 9, "2025-09-26")]
         [TestCase("ZN5", 2025, 10, "2025-10-31")]
         public void TreasuryFridayWeeklyExpiries(string root, int year, int month, string expected)
@@ -182,13 +202,15 @@ namespace QuantConnect.Tests.Common.Securities.FutureOption.Expiry
         }
 
         [Test]
-        public void TreasuryWednesdayWeekOneOnNewYearsDayRollsIntoPriorYear()
+        public void TreasuryWednesdayWeekOneOnNewYearsDayStaysNominal()
         {
-            // 2025-01-01 is the first Wednesday of January 2025 and an exchange holiday. The
-            // prior-business-day rule yields Tuesday 2024-12-31. RULE-BEHAVIOR ASSERTION ONLY:
-            // whether CME actually lists a week-1 Wednesday contract for a New Year's Day week
-            // (and where it expires) is unverified; P5 validation against listed instruments decides
-            Assert.AreEqual(new DateTime(2024, 12, 31), Expiry("WY1", "ZN", Market.CBOT, 2025, 1));
+            // 2025-01-01 is the first Wednesday of January 2025. New Year's Day is an MHDB BANK
+            // holiday, and bank holidays no longer adjust registry-rule expiries (P5-lite pilot,
+            // real-data verified on equity index: E2A expires ON Columbus Day, E2B ON Veterans
+            // Day, while holiday-week series are simply NOT LISTED - no E1D exists for Jan-2026).
+            // The engine therefore returns the nominal Wednesday for this presumed-never-listed
+            // contract; treasury weeklies are outside the pilot data, P5 verifies
+            Assert.AreEqual(new DateTime(2025, 1, 1), Expiry("WY1", "ZN", Market.CBOT, 2025, 1));
         }
 
         [TestCase("E5A", "ES", Market.CME, 2025, 4, Description = "April 2025 has four Mondays")]

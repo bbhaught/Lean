@@ -149,9 +149,15 @@ namespace QuantConnect.Securities.FutureOption
         /// quarterly month therefore exercise into the NEXT quarterly. Because equity-index
         /// quarterly options and quarterly futures expire the same third-Friday morning, there is
         /// no window between quarterly option expiry and quarterly futures expiry to disambiguate.
-        /// ASSUMED (unreachable in listings): a weekly expiring exactly on the quarterly futures
-        /// expiration date resolves to that quarterly; CME lists no weekly on the quarterly
-        /// expiration Friday since the quarterly option occupies it
+        /// REAL-DATA CORRECTION (P5-lite pilot, 2026-07-12): weeklies expiring exactly ON the
+        /// quarterly futures expiration date ARE listed (EW3 exists in every quarterly month as
+        /// the PM-settled European weekly alongside the AM-settled quarterly root) and the
+        /// exchange assigns them the NEXT quarterly: the quarterly future cash-settles at the
+        /// 8:30am SOQ while the weekly settles 3:00pm, so the same-date future is already gone.
+        /// Verified against Databento GLBX definitions underlying ids for the 2025-07..2026-07
+        /// pilot year: EW3 2025-09-19 -> ESZ5 (202512), EW3 2025-12-19 -> ESH6 (202603),
+        /// EW3 2026-03-20 -> ESM6 (202606). The comparison below is therefore STRICT
+        /// (futures expiry must be strictly after the option expiry date)
         /// </summary>
         private static DateTime ResolveNextQuarterly(FutureOptionRootDefinition definition, DateTime optionExpiration)
         {
@@ -161,7 +167,7 @@ namespace QuantConnect.Securities.FutureOption
             var contractMonth = FirstCycleMonthOnOrAfter(optionExpiration, _quarterlyCycle);
             for (var i = 0; i < MaxCycleIterations; i++)
             {
-                if (futureExpiryFunction(contractMonth).Date >= optionExpiration.Date)
+                if (futureExpiryFunction(contractMonth).Date > optionExpiration.Date)
                 {
                     return contractMonth;
                 }

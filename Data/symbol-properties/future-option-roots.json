@@ -58,7 +58,8 @@
     "weekday codes), LM1-5, ICD, LCE; GC L09-L16 (2012-era weekday codes); note VB was a 6B root",
     "in 2012 and is gated by listedSince to the ZB era. Settlement metadata for the new roots is",
     "family-pattern ASSUMED (equity-index European 15:00 CT, treasury American 14:00 CT, gold",
-    "12:30 CT, crude 13:30 CT) pending P5 verification."
+    "12:30 CT, crude 13:30 CT) pending P5 verification.",
+    "PILOT REAL-DATA VERIFICATION (2026-07-12, pilot_es_weekly year 2025-07..2026-07): all ES-complex weekly/EOM roots (EW, EW1-4, E1A-E5D) observed with CFI OCEFPS/OPEFPS = EUROPEAN exercise style and 20:00/21:00 UTC (= 15:00 America/Chicago) expiration timestamps, confirming the P6 seed; weekly underlying = next quarterly future confirmed via definitions underlying ids (e.g. October EW2 -> ESZ5)."
   ],
   "roots": [
     {"futureTicker": "EH", "optionTicker": "OEH", "market": "cbot", "cycle": "Standard", "expiryRuleId": "underlying_future", "underlyingRuleId": "legacy", "listedSince": "1900-01-01", "settlement": "FuturesSettled", "enabled": true},

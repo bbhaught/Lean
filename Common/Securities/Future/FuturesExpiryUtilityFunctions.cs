@@ -34,10 +34,30 @@ namespace QuantConnect.Securities.Future
         /// <param name="symbol">The particular symbol being traded</param>s
         internal static HashSet<DateTime> GetExpirationHolidays(string market, string symbol)
         {
+            return GetExpirationHolidays(market, symbol, includeBankHolidays: true);
+        }
+
+        /// <summary>
+        /// Get holiday list from the MHDB given the market and the symbol of the security.
+        /// fop-weeklies fork: the registry-driven weekly/EOM/daily expiry rules pass
+        /// includeBankHolidays = false - CME equity-index products trade through bank holidays
+        /// and their weeklies expire ON them (REAL-DATA VERIFIED, P5-lite pilot 2026-07-12:
+        /// E2A expires Columbus Day 2025-10-13, E2B expires Veterans Day 2025-11-11 per GLBX
+        /// definitions), so only full exchange closures may roll a registry-rule expiry.
+        /// The legacy monthly expiry functions keep the historical union, byte-identical
+        /// </summary>
+        /// <param name="market">The market the exchange resides in, i.e, 'usa', 'fxcm', ect...</param>
+        /// <param name="symbol">The particular symbol being traded</param>
+        /// <param name="includeBankHolidays">Whether bank holidays are included in the set</param>
+        internal static HashSet<DateTime> GetExpirationHolidays(string market, string symbol, bool includeBankHolidays)
+        {
             var exchangeHours = MarketHoursDatabase.FromDataFolder()
                         .GetEntry(market, symbol, SecurityType.Future)
                         .ExchangeHours;
-            return exchangeHours.Holidays.Concat(exchangeHours.BankHolidays).ToHashSet();
+            var holidays = includeBankHolidays
+                ? exchangeHours.Holidays.Concat(exchangeHours.BankHolidays)
+                : exchangeHours.Holidays;
+            return holidays.ToHashSet();
         }
 
         /// <summary>
