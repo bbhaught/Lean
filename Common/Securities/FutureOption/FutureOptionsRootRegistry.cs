@@ -151,6 +151,50 @@ namespace QuantConnect.Securities.FutureOption
         public FutureOptionSettlement Settlement { get; set; }
 
         /// <summary>
+        /// Exercise style of this root. Null preserves the legacy behavior of using the style
+        /// carried by the symbol's security identifier (American for all future options).
+        /// Weekly and end-of-month equity-index roots are European per CME contract specs; the
+        /// emitted symbols keep OptionStyle.American in the SID for data-model consistency, so
+        /// this field is the authoritative per-root style used by the security at runtime
+        /// </summary>
+        [JsonProperty("exerciseStyle")]
+        public OptionStyle? ExerciseStyle { get; set; }
+
+        /// <summary>
+        /// Exchange-local time of day at which trading in an expiring contract terminates on its
+        /// expiration date (e.g. 15:00 for ES weeklies, 08:30 for the ES quarterly AM expiry).
+        /// Null preserves the legacy date-only expiry handling
+        /// </summary>
+        [JsonProperty("expiryTimeOfDay")]
+        public TimeSpan? ExpiryTimeOfDay { get; set; }
+
+        /// <summary>
+        /// Exchange-local time of day of the settlement mark on the expiration date: the underlying
+        /// future price observation that determines in-the-money at expiry (e.g. the 15:00 CT fixing
+        /// for ES weeklies, the 14:00 CT mark for treasury weeklies). Null preserves the legacy
+        /// behavior of deciding exercise on the underlying's last close at delisting time
+        /// </summary>
+        [JsonProperty("settlementMarkTime")]
+        public TimeSpan? SettlementMarkTime { get; set; }
+
+        /// <summary>
+        /// IANA time zone name the <see cref="ExpiryTimeOfDay"/> and <see cref="SettlementMarkTime"/>
+        /// values are expressed in (e.g. "America/Chicago"). Null falls back to the option's
+        /// exchange time zone from the market hours database
+        /// </summary>
+        [JsonProperty("settlementTimeZone")]
+        public string SettlementTimeZone { get; set; }
+
+        /// <summary>
+        /// True when this root carries any of the P6 settlement metadata (exercise style, expiry
+        /// time or settlement mark time). Roots without settlement semantics keep the legacy
+        /// <see cref="QuantConnect.Orders.OptionExercise.DefaultExerciseModel"/> behavior unchanged
+        /// </summary>
+        [JsonIgnore]
+        public bool HasSettlementSemantics =>
+            ExerciseStyle != null || ExpiryTimeOfDay != null || SettlementMarkTime != null;
+
+        /// <summary>
         /// True if the root is enabled for chain resolution. Disabled roots remain resolvable
         /// for reverse mapping and classification but are excluded from MapAll
         /// </summary>

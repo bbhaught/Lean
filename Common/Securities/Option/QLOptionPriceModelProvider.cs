@@ -48,6 +48,20 @@ namespace QuantConnect.Securities.Option
                 return GetOptionPriceModel(pricingModelType.Value);
             }
 
+            if (symbol.SecurityType == SecurityType.FutureOption)
+            {
+                // Options on futures must be priced off the future as a forward (Black-76), not
+                // BSM-on-spot: with dividend yield = risk-free rate the underlying process is
+                // driftless, so the binomial tree prices American FOPs consistently with Black-76
+                // (design B issue 9). Note: European-style weekly FOP roots keep American SIDs
+                // (registry decision D6), so they are priced on the American tree too - a small
+                // upward approximation equal to the early-exercise premium, documented limitation
+                return new QLOptionPriceModel(
+                    process => new BinomialVanillaEngine<CoxRossRubinstein>(process, TimeStepsBinomial),
+                    riskFreeRateEstimator: null,
+                    dividendYieldEstimator: new RiskFreeRateQLDividendYieldEstimator());
+            }
+
             return symbol.ID.OptionStyle switch
             {
                 // CRR model has the best accuracy and speed suggested by

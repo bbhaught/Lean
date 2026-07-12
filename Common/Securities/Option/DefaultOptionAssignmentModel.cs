@@ -54,9 +54,12 @@ namespace QuantConnect.Securities.Option
             var option = parameters.Option;
             var underlying = parameters.Option.Underlying;
 
-            // we take only options that expire soon
-            if ((option.Symbol.ID.OptionStyle == OptionStyle.American && option.Symbol.ID.Date - option.LocalTime <= _priorExpiration ||
-                option.Symbol.ID.OptionStyle == OptionStyle.European && option.Symbol.ID.Date.Date == option.LocalTime.Date)
+            // we take only options that expire soon. Option.Style (not Symbol.ID.OptionStyle) is
+            // authoritative: future option roots can carry a European exercise style in the root
+            // registry while their SID keeps American, and European contracts must never be
+            // early-assigned before their expiration date
+            if ((option.Style == OptionStyle.American && option.Symbol.ID.Date - option.LocalTime <= _priorExpiration ||
+                option.Style == OptionStyle.European && option.Symbol.ID.Date.Date == option.LocalTime.Date)
                 // we take only deep ITM strikes
                 && IsDeepInTheMoney(option))
             {

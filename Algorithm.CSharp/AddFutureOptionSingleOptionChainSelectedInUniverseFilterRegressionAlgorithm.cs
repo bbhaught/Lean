@@ -147,7 +147,9 @@ namespace QuantConnect.Algorithm.CSharp
                         _invested = true;
                         optionInvested = true;
 
-                        if (marginModel.GetMaintenanceMargin(optionContract) == 0)
+                        // fop fork (design B issue 4): long future option positions are
+                        // premium-only, they carry no maintenance margin
+                        if (marginModel.GetMaintenanceMargin(optionContract) != 0)
                         {
                             throw new RegressionTestException("Unexpected Maintenance Margin requirement");
                         }
@@ -260,7 +262,7 @@ namespace QuantConnect.Algorithm.CSharp
             {"Tracking Error", "0.169"},
             {"Treynor Ratio", "2.574"},
             {"Total Fees", "$3.57"},
-            {"Estimated Strategy Capacity", "$28000000.00"},
+            {"Estimated Strategy Capacity", "$22000000.00"},
             {"Lowest Capacity Asset", "ES XCZJLCA62LNO|ES XCZJLC9NOB29"},
             {"Portfolio Turnover", "33.84%"},
             {"Drawdown Recovery", "0"},

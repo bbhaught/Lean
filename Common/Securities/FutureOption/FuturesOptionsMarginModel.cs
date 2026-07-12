@@ -25,6 +25,24 @@ namespace QuantConnect.Securities.Option
     /// </summary>
     public class FuturesOptionsMarginModel : FutureMarginModel
     {
+        /// <summary>
+        /// Days to expiry at which the short-side margin ramp starts. At or beyond this many days
+        /// the ramp multiplier is 1. Heuristic, not SPAN: short-dated short options carry margin
+        /// well above the flat proxy as expiry approaches (design B issue 4)
+        /// </summary>
+        public const int ShortExpiryRampStartDays = 30;
+
+        /// <summary>
+        /// Days to expiry at which the short-side margin ramp reaches its maximum multiplier
+        /// </summary>
+        public const int ShortExpiryRampEndDays = 1;
+
+        /// <summary>
+        /// Maximum short-side margin ramp multiplier, applied at <see cref="ShortExpiryRampEndDays"/>
+        /// days to expiry and closer. Heuristic calibration placeholder, not SPAN
+        /// </summary>
+        public const decimal ShortExpiryRampMaxMultiplier = 1.5m;
+
         private readonly Option _futureOption;
 
         /// <summary>
@@ -70,9 +88,15 @@ namespace QuantConnect.Securities.Option
         /// </remarks>
         public override MaintenanceMargin GetMaintenanceMargin(MaintenanceMarginParameters parameters)
         {
+            // Long future option positions are premium-only: the premium is paid in full up front,
+            // so no maintenance margin is required, mirroring the equity OptionMarginModel
+            if (parameters.Quantity >= 0)
+            {
+                return MaintenanceMargin.Zero;
+            }
+
             var underlyingRequirement = base.GetMaintenanceMargin(parameters.ForUnderlying(parameters.Quantity));
-            var positionSide = parameters.Quantity > 0 ? PositionSide.Long : PositionSide.Short;
-            return GetMarginRequirement(_futureOption, underlyingRequirement, positionSide);
+            return GetMarginRequirement(_futureOption, underlyingRequirement, PositionSide.Short);
         }
 
         /// <summary>
@@ -88,10 +112,23 @@ namespace QuantConnect.Securities.Option
         /// </remarks>
         public override InitialMargin GetInitialMarginRequirement(InitialMarginParameters parameters)
         {
-            var underlyingRequirement = base.GetInitialMarginRequirement(parameters.ForUnderlying()).Value;
-            var positionSide = parameters.Quantity > 0 ? PositionSide.Long : PositionSide.Short;
+            var security = parameters.Security;
+            var premium = security.QuoteCurrency.ConversionRate
+                * security.SymbolProperties.ContractMultiplier
+                * security.Price
+                * parameters.Quantity;
 
-            return new InitialMargin(GetMarginRequirement(_futureOption, underlyingRequirement, positionSide));
+            // Long future option positions are premium-only: the initial requirement is just the
+            // premium paid up front, mirroring the equity OptionMarginModel
+            if (parameters.Quantity >= 0)
+            {
+                return new OptionInitialMargin(0m, premium);
+            }
+
+            var underlyingRequirement = base.GetInitialMarginRequirement(parameters.ForUnderlying()).Value;
+
+            return new OptionInitialMargin(
+                GetMarginRequirement(_futureOption, underlyingRequirement, PositionSide.Short), premium);
         }
 
         /// <summary>
@@ -114,8 +151,10 @@ namespace QuantConnect.Securities.Option
                 return 0;
             }
 
+            var expiryRampMultiplier = 1m;
             if (positionSide == PositionSide.Short)
             {
+                expiryRampMultiplier = GetShortExpiryRampMultiplier(option);
                 if (option.Right == OptionRight.Call)
                 {
                     // going short the curve growth rate is slower
@@ -156,10 +195,45 @@ namespace QuantConnect.Securities.Option
             }
             if (denominator.IsNaNOrZero())
             {
-                return (int) maximumValue;
+                return (int) (expiryRampMultiplier * maximumValue);
             }
 
-            return (int) (maximumValue / (1 + denominator).SafeDecimalCast());
+            return (int) (expiryRampMultiplier * maximumValue / (1 + denominator).SafeDecimalCast());
+        }
+
+        /// <summary>
+        /// Gets the short-side days-to-expiry margin ramp multiplier: 1 at or beyond
+        /// <see cref="ShortExpiryRampStartDays"/> days to expiry, rising linearly to
+        /// <see cref="ShortExpiryRampMaxMultiplier"/> at <see cref="ShortExpiryRampEndDays"/>
+        /// days and closer. This is a documented heuristic, not SPAN: it approximates the margin
+        /// expansion clearing houses apply to short-dated short options (design B issue 4).
+        /// Covered-pair offsets (e.g. short call against long future) require position-group
+        /// buying power models and are deferred to a later phase; short positions are margined naked
+        /// </summary>
+        /// <param name="option">The future option contract to trade</param>
+        /// <returns>The multiplier to apply to the short-side margin requirement</returns>
+        public static decimal GetShortExpiryRampMultiplier(Option option)
+        {
+            if (!option.HasLocalTimeKeeper)
+            {
+                // no algorithm clock available (e.g. detached security instances): no ramp
+                return 1m;
+            }
+
+            var daysToExpiry = (option.Symbol.ID.Date.Date - option.LocalTime.Date).Days;
+            if (daysToExpiry >= ShortExpiryRampStartDays)
+            {
+                return 1m;
+            }
+
+            if (daysToExpiry <= ShortExpiryRampEndDays)
+            {
+                return ShortExpiryRampMaxMultiplier;
+            }
+
+            return 1m + (ShortExpiryRampMaxMultiplier - 1m)
+                * (ShortExpiryRampStartDays - daysToExpiry)
+                / (ShortExpiryRampStartDays - ShortExpiryRampEndDays);
         }
     }
 }

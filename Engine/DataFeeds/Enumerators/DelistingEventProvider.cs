@@ -35,6 +35,8 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Enumerators
         private bool _delisted;
         private bool _delistedWarning;
         private IMapFileProvider _mapFileProvider;
+        private DateTime _startTime;
+        private bool _isDailyCycleFutureOption;
 
         /// <summary>
         /// The delisting date
@@ -66,6 +68,12 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Enumerators
         {
             Config = config;
             _mapFileProvider = mapFileProvider;
+            _startTime = startTime;
+
+            _isDailyCycleFutureOption = config.Symbol.SecurityType == SecurityType.FutureOption
+                && Securities.FutureOption.FutureOptionsRootRegistry.TryGetDefinition(
+                    config.Symbol.ID.Symbol, config.Symbol.ID.Market, out var rootDefinition)
+                && (rootDefinition.Cycle & Securities.FutureOption.FutureOptionExpiryCycles.Daily) != 0;
 
             InitializeMapFile();
         }
@@ -82,7 +90,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Enumerators
                 // we send the delisting warning when we reach the delisting date, here we make sure we compare using the date component
                 // of the delisting date since for example some futures can trade a few hours in their delisting date, else we would skip on
                 // emitting the delisting warning, which triggers us to handle liquidation once delisted
-                if (!_delistedWarning && eventArgs.Date >= DelistingDate.Value.Date)
+                if (!_delistedWarning && eventArgs.Date >= GetDelistingWarningDate())
                 {
                     _delistedWarning = true;
                     var price = eventArgs.LastBaseData?.Price ?? 0;
@@ -104,6 +112,33 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Enumerators
                         DelistingType.Delisted);
                 }
             }
+        }
+
+        /// <summary>
+        /// The date at which the delisting warning is emitted. For most securities this is the
+        /// delisting date itself. Daily-cycle future option roots list on (or days before) their
+        /// expiration date, so their whole life can be a single session: for those the warning is
+        /// pulled forward to the day before expiry - clamped so it never precedes the subscription
+        /// start (the contract's effective listing) - giving algorithms a chance to act while the
+        /// contract still trades (design A section 5, fop fork)
+        /// </summary>
+        /// <returns>The date at which the delisting warning should be emitted</returns>
+        protected virtual DateTime GetDelistingWarningDate()
+        {
+            var warningDate = DelistingDate.Value.Date;
+            if (_isDailyCycleFutureOption)
+            {
+                var pulledForward = warningDate.AddDays(-1);
+                warningDate = pulledForward > _startTime.Date ? pulledForward : _startTime.Date;
+
+                // never emit after the delisting date itself
+                if (warningDate > DelistingDate.Value.Date)
+                {
+                    warningDate = DelistingDate.Value.Date;
+                }
+            }
+
+            return warningDate;
         }
 
         /// <summary>

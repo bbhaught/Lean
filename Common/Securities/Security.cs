@@ -531,6 +531,11 @@ namespace QuantConnect.Securities
         }
 
         /// <summary>
+        /// True when a local time keeper has been set, i.e. <see cref="LocalTime"/> is available
+        /// </summary>
+        internal bool HasLocalTimeKeeper => _localTimeKeeper != null;
+
+        /// <summary>
         /// Get the current value of the security.
         /// </summary>
         public virtual decimal Price => Cache.Price;

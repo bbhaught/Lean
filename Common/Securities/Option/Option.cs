@@ -227,9 +227,11 @@ namespace QuantConnect.Securities.Option
         public OptionRight Right => Symbol.ID.OptionRight;
 
         /// <summary>
-        /// Gets the option style
+        /// Gets the option style. Derived security types can override the style carried by the
+        /// symbol's security identifier, e.g. future options whose root registry declares a
+        /// European exercise style while the SID keeps American for data-model consistency
         /// </summary>
-        public OptionStyle Style => Symbol.ID.OptionStyle;
+        public virtual OptionStyle Style => Symbol.ID.OptionStyle;
 
         /// <summary>
         /// Gets the most recent bid price if available

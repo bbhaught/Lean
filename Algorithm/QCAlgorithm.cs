@@ -2280,6 +2280,15 @@ namespace QuantConnect.Algorithm
                 throw new ArgumentException("Symbol provided must be canonical (i.e. the Symbol returned from AddFuture(), not AddFutureContract().");
             }
 
+            if (LiveMode && (cycles & ~FutureOptionExpiryCycles.Standard) != 0)
+            {
+                throw new InvalidOperationException(
+                    $"AddFutureOption(): live trading of non-standard future option expiry cycles ('{cycles}' requested for " +
+                    $"'{symbol.ID.Symbol}') is not supported: exercise-by-exception, SPAN margin and broker weekly symbology " +
+                    "are unmodeled for weekly/EOM/daily roots. Request FutureOptionExpiryCycles.Standard in live mode; " +
+                    "weekly and daily future options are available for backtesting only.");
+            }
+
             var normalizedRootFilter = rootFilter?.Select(root => root.ToUpperInvariant()).ToList();
 
             // let the chain providers know which roots to fan out over for this future
@@ -2348,6 +2357,15 @@ namespace QuantConnect.Algorithm
             if (symbol.IsCanonical())
             {
                 throw new ArgumentException("Expected non-canonical Symbol (i.e. a Symbol representing a specific Future contract");
+            }
+
+            if (LiveMode && !FutureOptionSymbol.IsStandard(symbol))
+            {
+                throw new InvalidOperationException(
+                    $"AddFutureOptionContract(): live trading of non-standard future option contracts ('{symbol.Value}', " +
+                    $"root '{symbol.ID.Symbol}') is not supported: exercise-by-exception, SPAN margin and broker weekly " +
+                    "symbology are unmodeled for weekly/EOM/daily roots. Standard monthly/quarterly future options remain " +
+                    "live-tradable; weekly and daily future options are available for backtesting only.");
             }
 
             return AddOptionContract(symbol, resolution, fillForward, leverage, extendedMarketHours);

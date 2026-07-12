@@ -113,16 +113,19 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
+        // fop fork (design B issue 4): expected statistics regenerated after making long
+        // future option positions premium-only (no maintenance margin, initial = premium).
+        // SetHoldings-based sizing buys more contracts per target, changing fills and P&L
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Orders", "304"},
+            {"Total Orders", "98"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "0%"},
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
             {"Start Equity", "100000"},
-            {"End Equity", "86704.62"},
+            {"End Equity", "9.28"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
             {"Sortino Ratio", "0"},
@@ -137,12 +140,12 @@ namespace QuantConnect.Algorithm.CSharp
             {"Information Ratio", "0"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$13367.88"},
+            {"Total Fees", "$99990.72"},
             {"Estimated Strategy Capacity", "$0"},
             {"Lowest Capacity Asset", "ES XCZJLCGM7IF8|ES XCZJLC9NOB29"},
-            {"Portfolio Turnover", "35.03%"},
+            {"Portfolio Turnover", "3757489.22%"},
             {"Drawdown Recovery", "0"},
-            {"OrderListHash", "3f98435e7fc61b79c7ff9d1690457c9f"}
+            {"OrderListHash", "db0f5a7b2607aaeea51db601efcf3222"}
         };
     }
 }
