@@ -71,7 +71,11 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.AreEqual(0m, futureOptionBuyingPowerModel.GetMaintenanceMargin(optionSecurity));
             Assert.AreNotEqual(0m, futureBuyingPowerModel.GetMaintenanceMargin(optionSecurity.Underlying));
 
-            Assert.AreNotEqual(0m, futureOptionBuyingPowerModel.GetInitialMarginRequirement(optionSecurity, 10));
+            // fop fork (design B issue 4): buying a future option is premium-only, the initial
+            // requirement is the premium paid up front instead of a fraction of the future margin
+            optionSecurity.SetMarketPrice(new Tick { Value = 15m, Time = time });
+            var initialMargin = futureOptionBuyingPowerModel.GetInitialMarginRequirement(optionSecurity, 10);
+            Assert.AreEqual(15m * 10, initialMargin);
         }
 
         [Test]
@@ -105,11 +109,16 @@ namespace QuantConnect.Tests.Common.Securities
                 RegisteredSecurityDataTypesProvider.Null
             );
             optionSecurity.Underlying.SetMarketPrice(new Tick {Value = price, Time = time});
-            optionSecurity.Holdings.SetHoldings(1.5m, 1);
             optionSecurity.Underlying.Holdings.SetHoldings(1.5m, 1);
 
             var futureOptionBuyingPowerModel = new FuturesOptionsMarginModel(futureOption: optionSecurity);
 
+            // fop fork (design B issue 4): long future option positions are premium-only, no
+            // maintenance margin; short positions keep the underlying-derived requirement
+            optionSecurity.Holdings.SetHoldings(1.5m, 1);
+            Assert.AreEqual(0m, futureOptionBuyingPowerModel.GetMaintenanceMargin(optionSecurity));
+
+            optionSecurity.Holdings.SetHoldings(1.5m, -1);
             Assert.AreNotEqual(0m, futureOptionBuyingPowerModel.GetMaintenanceMargin(optionSecurity));
         }
 
@@ -144,11 +153,16 @@ namespace QuantConnect.Tests.Common.Securities
                 RegisteredSecurityDataTypesProvider.Null
             );
             optionSecurity.Underlying.SetMarketPrice(new Tick { Value = price, Time = time });
-            optionSecurity.Holdings.SetHoldings(1.5m, 1);
 
             var futureBuyingPowerModel = new FutureMarginModel(security: optionSecurity.Underlying);
             var futureOptionBuyingPowerModel = new FuturesOptionsMarginModel(futureOption: optionSecurity);
 
+            // fop fork (design B issue 4): long future option positions are premium-only, no
+            // maintenance margin; short positions keep the underlying-derived requirement
+            optionSecurity.Holdings.SetHoldings(1.5m, 1);
+            Assert.AreEqual(0m, futureOptionBuyingPowerModel.GetMaintenanceMargin(optionSecurity));
+
+            optionSecurity.Holdings.SetHoldings(1.5m, -1);
             Assert.AreNotEqual(0m, futureOptionBuyingPowerModel.GetMaintenanceMargin(optionSecurity));
             Assert.AreEqual(0, futureBuyingPowerModel.GetMaintenanceMargin(optionSecurity.Underlying));
         }

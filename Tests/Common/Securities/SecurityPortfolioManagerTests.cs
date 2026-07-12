@@ -2748,7 +2748,12 @@ namespace QuantConnect.Tests.Common.Securities
                 new TestCaseData(SecurityType.FutureOption, 0, OrderDirection.Buy),
                 new TestCaseData(SecurityType.FutureOption, 0, OrderDirection.Sell),
                 new TestCaseData(SecurityType.FutureOption, +10, OrderDirection.Buy),
-                new TestCaseData(SecurityType.FutureOption, +10, OrderDirection.Sell),
+                // fop fork (design B issue 4): long future options are now premium-only, returning
+                // a premium-bearing OptionInitialMargin like equity options do. This test's naive
+                // expected-value formula diverges from the position-group path for premium-bearing
+                // long option reversals, which is why the equivalent equity option case
+                // (Option, +10, Sell) above is marked Explicit upstream; same treatment here
+                new TestCaseData(SecurityType.FutureOption, +10, OrderDirection.Sell).Explicit(),
                 new TestCaseData(SecurityType.FutureOption, -10, OrderDirection.Buy),
                 new TestCaseData(SecurityType.FutureOption, -10, OrderDirection.Sell),
             };
