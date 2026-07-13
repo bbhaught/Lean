@@ -59,6 +59,32 @@
                     "remoteRoot": "${workspaceFolder}"
                 }
             ]
+        },
+        {
+            // Attach to a LEAN launcher started with a config that has
+            // "debugging": true, "debugging-method": "DebugPy"
+            // (e.g. Launcher/bin/Release/config-pilot-wheel-py.json).
+            // The engine blocks at "debugpy waiting for attach at port 5678..."
+            // until this configuration is launched (F5). Breakpoints then hit in
+            // Algorithm.Python/*.py (e.g. FutureOptionWheelPilotAlgorithm.py
+            // on_data / _try_enter).
+            // IMPORTANT: launch the engine with the LEAN conda env bin first on PATH
+            // (see the comment block at the top of FutureOptionWheelPilotAlgorithm.py),
+            // otherwise the debugpy adapter subprocess fails and the port never opens.
+            "name": "Python: Attach to LEAN (debugpy)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "${workspaceFolder}"
+                }
+            ],
+            "justMyCode": false
         }
     ]
 }
